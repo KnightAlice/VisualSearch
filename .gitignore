@@ -1,0 +1,11 @@
+data/
+img/
+COCOSearch18/
+.ipynb_checkpoints
+__pycache__
+MCS/
+result_archive
+models/
+*.pth
+pth
+mae_log/
