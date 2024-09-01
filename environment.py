@@ -10,7 +10,15 @@ import utils
 from torchvision.transforms import functional
 import time
 
+"""Clarify: act->{x,y} : x is row idx, which is counted from the top; y is column index, counted from the left
+            but bbox->{x,y,w,h}, x is column idx, y is row idx, the same coord as ImageDraw by the way
+"""
 
+"""action coord:
+            ↖ ↑ ↗
+            ←  o  →
+            ↙ ↓ ↘
+"""
 
 class StaticImgEnv:
 
@@ -28,8 +36,14 @@ class StaticImgEnv:
 
         self.init='center' #or 'random'/'manual'
         self.action_range=self.env_args['action_range']
+        assert self.action_range==self.env_args['vision_radius'] #in this version should be the same
+        
         self.set_count=0 #count env num
         self.device=device
+        
+        #action-vision mapping constant matrix
+        self.grid, scale_factors = utils.get_fovea_transform(height=self.action_range, width=self.action_range, device=device)
+        self.scale_factors=torch.tensor(scale_factors).to(device)
 
     def observe(self):
         #start_time=time.time()
@@ -47,27 +61,31 @@ class StaticImgEnv:
             #top: int, left: int, height: int, width: int
             #fovea_args
             
-            top=int(fix_pos[1]-height/2)
-            left=int(fix_pos[0]-width/2)
+            top=int(fix_pos[0]-height/2) #fovea upper abs pos
+            left=int(fix_pos[1]-width/2) #fovea left abs pos
 
             '''should add penalty here, it's just a boundary avoidance branch'''
-            if top<= -height:
-                top= -height+1
+            if top<= 0-height: #upper boundary, with tolerance of vision_radius
+                top= 0-height+1
                 self.fixation_reset(i,mode='center')
-            if left<= -width:
-                left= -width+1
+                self.reaching_boundary[self.step_id] = 1
+            if left<= 0-width: #left boundary, with tolerance of vision_radius
+                left= 0-width+1
                 self.fixation_reset(i,mode='center')
-            if top>= self.boundary[2]:
+                self.reaching_boundary[self.step_id] = 1
+            if top>= self.boundary[2]: #lower boundary, with tolerance of vision_radius
                 top= self.boundary[2]-1
                 self.fixation_reset(i,mode='center')
-            if left>= self.boundary[3]:
+                self.reaching_boundary[self.step_id] = 1
+            if left>= self.boundary[3]: #right boundary, with tolerance of vision_radius
                 left= self.boundary[3]-1
                 self.fixation_reset(i,mode='center')
+                self.reaching_boundary[self.step_id] = 1
                  
             #observation = v2.functional.crop(self.obs_space[i],top,left,height,width) #self-padding
             
             """TIME COMPLEXITY S.T. (height, width) -> vision_radius"""
-            observation=utils.foveate_transform_cuda(self.obs_space[i], [top, left, height, width], output_size=2*self.env_args['radius'], device=self.device) #foveate
+            observation=utils.foveate_transform_cuda(self.obs_space[i], [top, left, height, width], output_size=2*self.env_args['radius'], grid=self.grid, device=self.device) #foveate
             #plot.imshow(functional.to_pil_image(observation.detach().cpu()))
             #raise ValueError
             
@@ -87,10 +105,12 @@ class StaticImgEnv:
         reward=torch.ones((self.batch_size,)).to(self.device)
         #print(self.bbox)
         #check if fixations hit the bbox
-        hit_bbox_left=self.fixations[:,self.step_id, 0]>self.bbox[:,0]
-        hit_bbox_right=self.fixations[:,self.step_id,0]<(self.bbox[:,0] + self.bbox[:,2])
-        hit_bbox_top=self.fixations[:,self.step_id,1]>self.bbox[:,1]
-        hit_bbox_bottom=self.fixations[:,self.step_id,1]<(self.bbox[:,1] + self.bbox[:,3])
+        #the bbox in the json is structured [x,y,w,h], where x is literally X coordinate
+        #so we have to transpose our coord system
+        hit_bbox_left=self.fixations[:,self.step_id, 1]>self.bbox[:,0]
+        hit_bbox_right=self.fixations[:,self.step_id,1]<(self.bbox[:,0] + self.bbox[:,2])
+        hit_bbox_top=self.fixations[:,self.step_id,0]>self.bbox[:,1]
+        hit_bbox_bottom=self.fixations[:,self.step_id,0]<(self.bbox[:,1] + self.bbox[:,3])
         hit_bbox=torch.logical_and(torch.logical_and(torch.logical_and(hit_bbox_left,hit_bbox_right),hit_bbox_top),hit_bbox_bottom)
             
         with torch.no_grad():
@@ -114,15 +134,15 @@ class StaticImgEnv:
 
         #act batch being the grid index, so a mapping is applied
         act_batch=self.idx_to_vector(act_batch)
-        self.fixations[:,self.step_id,:]+=act_batch+self.fixations[:,self.step_id-1,:]
+        self.fixations[:,self.step_id,:]+= (act_batch+self.fixations[:,self.step_id-1,:])
         #boundary check
         if torch.any(self.fixations[:,self.step_id,:])<0:
             print("Reaching Upper/Left Boundary!")
             raise ValueError
-        elif torch.any(self.fixations[:,self.step_id,0])>self.boundary[3]:
+        elif torch.any(self.fixations[:,self.step_id,1])>self.boundary[3]:
             print("Reaching Right Boundary!")
             raise ValueError
-        elif torch.any(self.fixations[:,self.step_id,1])>self.boundary[2]:
+        elif torch.any(self.fixations[:,self.step_id,0])>self.boundary[2]:
             print("Reaching Bottom Boundary!")
             raise ValueError
             
@@ -173,7 +193,10 @@ class StaticImgEnv:
                                      device=self.device)
         self.status = torch.zeros((self.batch_size,self.max_steps,),
                                   dtype=torch.int8,
-                                  device=self.device)#0 not found, 1 for found
+                                  device=self.device)#0 not found, 1 found
+        self.reaching_boundary = torch.zeros((self.batch_size,self.max_steps,),
+                                  dtype=torch.int8,
+                                  device=self.device)#0 not hit, 1 hit
         self.is_active = torch.ones(self.batch_size,
                                     dtype=torch.uint8,
                                     device=self.device)
@@ -186,8 +209,8 @@ class StaticImgEnv:
             w=self.obs_space.shape[3]
             #[b,3,h,w]
 
-            px=np.round(w/2)
-            py=np.round(h/2)
+            px=np.round(h/2)
+            py=np.round(w/2)
             self.fixations[:, 0, 0]=px
             self.fixations[:, 0, 1]=py
         elif self.init=='random':
@@ -202,17 +225,19 @@ class StaticImgEnv:
             w=self.obs_space.shape[3]
             #[b,3,h,w]
 
-            px=np.round(w/2)
-            py=np.round(h/2)
+            px=np.round(h/2)
+            py=np.round(w/2)
             self.fixations[idx, self.step_id, 0]=px
             self.fixations[idx, self.step_id, 1]=py
             
         self.reset_count[idx]=self.reset_count[idx] + 1
+
+        return 1
             
 
     def set_data(self, img, target_id, bbox):
         self.obs_space = img
-        self.boundary=[0,0,img.shape[2],img.shape[3]]
+        self.boundary=[0,0,img.shape[2],img.shape[3]] #top, left, bottom, right
         self.bbox=bbox.to(self.device)
         self.batch_size=img.shape[0]
         self.target_id=target_id
@@ -221,7 +246,8 @@ class StaticImgEnv:
         self.reset()
 
     def plot_history(self,idx=0):
-        fixations=self.fixations[idx].detach().cpu() #[steps,coords]
+        fixations=self.fixations[idx].detach().cpu().flip(-1) #[steps,coords], flip to adapt to ImageDraw coord
+        print(fixations.shape)
         fixations=[tuple(item) for item in fixations[0:self.step_id+1]]
         img=self.obs_space[idx].detach().cpu().squeeze(0)
         toimg = v2.ToPILImage()
@@ -251,22 +277,35 @@ class StaticImgEnv:
         pass
 
     def idx_to_vector(self,act_batch):
-        
+        #from grid_idx to precise pixel-level displacement
+        #manual mapping instead of actor training
+
+        #scaled->non-scaled
         action_range=self.action_range
         grid_size=self.env_args['grid_size']
 
         idx_x=act_batch/grid_size
-        idx_x=torch.floor(idx_x)
-        idx_y=act_batch%(grid_size)
-        coord=torch.stack((idx_x,idx_y),dim=-1)+0.5
-        center=grid_size/2*torch.ones(act_batch.shape[0],2)
+        idx_x=torch.floor(idx_x) #row_idx
+        
+        idx_y=act_batch%(grid_size) #column_idx
+        
+        coord=torch.stack((idx_x,idx_y),dim=-1)+0.5 #to center
+        
+        center=self.env_args['radius']*torch.ones(act_batch.shape[0],2)
         center=center.to(self.device)
-        step=action_range/grid_size
-        res=coord-center
+        
+        step=self.env_args['radius']*2/grid_size #224/14=16
+        
+        #inverse
+        target_pos=coord*step #224,224
+        target_pos=(target_pos/(self.env_args['radius']*2))*self.env_args['vision_radius']
+        target_pos=torch.round(target_pos).to(torch.long)
 
-        act_vector=torch.round(res*step).to(torch.long)
-        #print(act_vector.shape)
-
-        return act_vector
+        grid=(self.grid+1)/2 * (self.env_args['vision_radius']-1) #grid for transformed=grid_sample(origin)
+        grid=torch.flip(grid, dims=[-1]) #flip y,x to x,y
+        
+        true_pos = torch.round(grid[0,target_pos[:,0],target_pos[:,1]] - self.env_args['vision_radius']/2)
+        
+        return true_pos.to(torch.long)
         
         

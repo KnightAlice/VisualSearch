@@ -1,11 +1,11 @@
 #concatenate shift center to the embedding dim
 
 Environment:
-  radius: 112 #output fovea radius -- usually be doubled
+  radius: 112 #output fovea radius, true img size the agent could see -- usually be doubled
   vision_radius: 500 #theoretical vision range
-  action_range: 224 #action range 
+  action_range: 500 #action range was 224
   max_steps: 15 #max steps; -1 for unlimited
-  grid_size: 7 #action space grid size
+  grid_size: 14 #action space grid size
   plot_freq: 10 #plot trajectory freq
   target_num: 18 #num_targets to find
 

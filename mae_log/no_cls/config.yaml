@@ -1,0 +1,60 @@
+#concatenate shift center to the embedding dim
+
+Environment:
+  radius: 112 #output fovea radius -- usually be doubled
+  vision_radius: 500 #theoretical vision range
+  action_range: 500 #action range 
+  max_steps: 15 #max steps; -1 for unlimited
+  grid_size: 14 #action space grid size
+  plot_freq: 10 #plot trajectory freq
+  target_num: 18 #num_targets to find
+
+PrefixResnet:
+  depth: 6 #layer depth
+  kernel_size: ([3,3],[3,3],[3,3])
+  in_channel: 3
+  requires_grad: False #keep fixed
+
+PrefixCNN:
+  img_size: 224
+  patch_size: 16
+  in_channel: 3
+  out_channel: 512 #768 #embed_dim
+  requires_grad: True #trainable
+  pretrained_model_path: ""
+
+ViTEncoder:
+  embed_dim: 512 #768
+  depth: 24 #12
+  num_heads: 16
+  mlp_ratio: 4.0
+  qkv_bias: False
+  qk_scale: False
+  drop_rate: 0.2
+  attn_drop_rate: 0.1
+  drop_path_rate: 0.1
+  num_classes: 100
+  weight_path: './mae_log/no_cls/encoder_param.pth'
+
+ViTDecoder:
+  embed_dim: 256 #512
+  depth: 8 
+  num_heads: 16
+  mlp_ratio: 4.0
+  qkv_bias: False
+  qk_scale: False
+  drop_rate: 0.0
+  attn_drop_rate: 0.1
+  drop_path_rate: 0.1
+
+ShiftTransformer:
+  embed_dim: 513 #512+1
+  depth: 2 
+  num_heads: 16
+  mlp_ratio: 4.0
+  qkv_bias: False
+  qk_scale: False
+  drop_rate: 0.0
+  attn_drop_rate: 0.0
+  drop_path_rate: 0.0
+  weight_path: './mae_log/shift_test/shift_param_r_1.pth'

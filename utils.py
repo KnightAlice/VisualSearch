@@ -29,7 +29,7 @@ class COCOSearch18(Dataset):
         {'name': '000000478726.jpg', 'subject': 2, 'task': 'bottle', 'condition': 'present', 'bbox': [1063, 68, 95, 334], 'X': [848.2, 799.2, 731.1, 1114.4, 1121.5], 'Y': [517.2, 476.2, 383.4, 271.1, 205.9], 'T': [73, 193, 95, 635, 592], 'length': 5, 'correct': 1, 'RT': 1159, 'split': 'train'}
         Including the initial center fixation
         '''
-        idx=1 #this is test
+        idx=2 #this is test
         fix_len=45 #restricted vector size
         transform=v2.Compose([v2.ToImage(), 
                               v2.ToDtype(torch.float32, scale=True)])
@@ -129,6 +129,7 @@ def collect_trajs(env,
                                                     policy,
                                                     sample_action=True,
                                                     action_mask=None)#not implemented
+
             new_obs,reward,_,_,status=env.step(act_batch)
             epi_values.append(epi_value)
             actions.append(act_batch)
@@ -263,36 +264,35 @@ def center_crop(images, xy, patch_size, img_size):
     images = torch.stack(image_folder)
     masks = torch.stack(masks)
     return images, masks
-        
-def foveate_transform_cuda(image, fix_pos, output_size, device, alpha=0.1, beta=-0.005):
+
+def get_fovea_transform(height, width, device, alpha=0.1, beta=-0.005):
+    
+    center_x, center_y = height // 2, width // 2
+    # Create meshgrid and calculate distances in a vectorized way
+    x, y = np.ogrid[:height, :width]
+    distances = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+    factors = 0.2 + alpha * np.exp(-beta * distances)
+    new_x = center_x + (x - center_x) * factors
+    new_y = center_y + (y - center_y) * factors
+
+    # Normalize coordinates to the range [-1, 1] for grid_sample
+    new_x = (new_x / (height - 1)) * 2 - 1
+    new_y = (new_y / (width - 1)) * 2 - 1
+
+    # Stack and reshape to form a grid of shape [1, H, W, 2]
+    grid = np.stack((new_y, new_x), axis=-1)
+    grid = torch.tensor(grid, dtype=torch.float32).unsqueeze(0).to(device)
+
+    return grid, factors
+    
+    
+def foveate_transform_cuda(image, fix_pos, output_size, grid, device):
     # fix_pos -> top,left,height,width
     # Input [C, H, W]
     image=image.to(device)
     image = functional.crop(image,fix_pos[0],fix_pos[1], fix_pos[2], fix_pos[3])
     assert image.shape[0] == 3
     assert len(fix_pos) == 4
-    height, width = image.shape[1:]
-
-    center_x, center_y = width // 2, height // 2
-
-    # Create meshgrid and calculate distances in a vectorized way
-    y, x = np.ogrid[:height, :width]
-    distances = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
-
-    # Calculate scaling factors
-    factors = 0.2 + alpha * np.exp(-beta * distances)
-
-    # Apply transformation in a vectorized way
-    new_x = center_x + (x - center_x) * factors
-    new_y = center_y + (y - center_y) * factors
-
-    # Normalize coordinates to the range [-1, 1] for grid_sample
-    new_x = (new_x / (width - 1)) * 2 - 1
-    new_y = (new_y / (height - 1)) * 2 - 1
-
-    # Stack and reshape to form a grid of shape [1, H, W, 2]
-    grid = np.stack((new_x, new_y), axis=-1)
-    grid = torch.tensor(grid, dtype=torch.float32).unsqueeze(0).to(device)
 
     # Convert image to tensor and add batch dimension
     image = image.unsqueeze(0)
