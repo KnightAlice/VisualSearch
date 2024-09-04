@@ -15,10 +15,11 @@ import numpy as np
 
 class COCOSearch18(Dataset):
 
-    def __init__(self, json, root="COCOSearch18/images"):
+    def __init__(self, json, root="COCOSearch18/images", test=False):
         self.root = root
         self.json = json
         self.ImageFolder=ImageFolder(root)
+        self.test = test
 
     def __len__(self):
         return len(self.json)
@@ -29,7 +30,9 @@ class COCOSearch18(Dataset):
         {'name': '000000478726.jpg', 'subject': 2, 'task': 'bottle', 'condition': 'present', 'bbox': [1063, 68, 95, 334], 'X': [848.2, 799.2, 731.1, 1114.4, 1121.5], 'Y': [517.2, 476.2, 383.4, 271.1, 205.9], 'T': [73, 193, 95, 635, 592], 'length': 5, 'correct': 1, 'RT': 1159, 'split': 'train'}
         Including the initial center fixation
         '''
-        idx=2 #this is test
+        if self.test:
+            idx=2 #fixed img
+            
         fix_len=45 #restricted vector size
         transform=v2.Compose([v2.ToImage(), 
                               v2.ToDtype(torch.float32, scale=True)])

@@ -424,7 +424,6 @@ class MaskedViTDecoder(nn.Module):
         return x
 
     def forward_shift_loss(self, imgs, pred, xy):
-        """Deprecated"""
         """
         designed for ShiftFormer, operate crop on target imgs
         imgs: [N, 3, H, W]
@@ -448,36 +447,11 @@ class MaskedViTDecoder(nn.Module):
         if self.masked_decoder_loss:
             masks=masks.to(self.device)
             loss = (loss * masks).sum() / masks.sum()
+        else:
+            loss = loss.mean()
             
         return loss
 
-    def forward_shift_cat_loss(self, imgs, pred, xy):
-        """
-        designed for ShiftFormer, operate crop on target imgs
-        imgs: [N, 3, H, W]
-        pred: [N, L, p*p*3]
-        mask: [N, L], 1 is keep, 0 is remove
-        """
-        with torch.no_grad():
-            imgs, masks = center_crop(imgs, xy, patch_size=self.patch_size, img_size=imgs.shape[-1])
-
-        assert imgs.shape[0]==pred.shape[0]
-        target = self.patchify(imgs)
-
-        if self.norm_pix_loss:
-            mean = torch.mean(target, dim=-1, keepdim=True)
-            var = torch.var(target, dim=-1, keepdim=True, unbiased=False)
-            target = (target - mean) / torch.sqrt(var + 1.0e-6)
-
-        loss = (pred - target) ** 2
-        loss = torch.mean(loss, -1)  # [N, L], mean loss per patch
-
-        if self.masked_decoder_loss:
-            masks=masks.to(self.device)
-            loss = (loss * masks).sum() / masks.sum()
-            
-        return loss
-    
     def forward_loss(self, imgs, pred, mask):
         """
         imgs: [N, 3, H, W]

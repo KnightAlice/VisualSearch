@@ -22,7 +22,7 @@ import time
 
 class StaticImgEnv:
 
-    def __init__(self,env_args=None,agent=None,device='cuda'):
+    def __init__(self,env_args=None,agent=None,device='cuda', show_plot=False):
         self.step_id=0
         self.fixations=None #[horizontal,vertical]
         self.env_args=env_args
@@ -44,6 +44,8 @@ class StaticImgEnv:
         #action-vision mapping constant matrix
         self.grid, scale_factors = utils.get_fovea_transform(height=self.action_range, width=self.action_range, device=device)
         self.scale_factors=torch.tensor(scale_factors).to(device)
+
+        self.show_plot = show_plot
 
     def observe(self):
         #start_time=time.time()
@@ -154,7 +156,7 @@ class StaticImgEnv:
         status=torch.clone(self.status) #not implemented
         
         #if self.step_id>=self.max_steps-1 and self.set_count%self.env_args.plot_freq==0: #step limit reached
-        if self.set_count%self.env_args['plot_freq']==0:
+        if self.set_count%self.env_args['plot_freq']==0 and self.show_plot:
             imgshow=self.plot_history()
             imgshow.save(f'img/{self.target_id[0]}_{self.step_id}.jpg')
             plot.imshow(imgshow)
@@ -247,7 +249,6 @@ class StaticImgEnv:
 
     def plot_history(self,idx=0):
         fixations=self.fixations[idx].detach().cpu().flip(-1) #[steps,coords], flip to adapt to ImageDraw coord
-        print(fixations.shape)
         fixations=[tuple(item) for item in fixations[0:self.step_id+1]]
         img=self.obs_space[idx].detach().cpu().squeeze(0)
         toimg = v2.ToPILImage()
