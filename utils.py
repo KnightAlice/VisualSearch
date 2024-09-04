@@ -310,3 +310,20 @@ def foveate_transform_cuda(image, fix_pos, output_size, grid, device):
     trans_image = trans_image.squeeze(0)
 
     return trans_image
+
+def get_edge_mask(image, device):
+    image_tensor = image
+
+    edge_kernel = torch.tensor([[[[0,  0, -1,  0,  0],
+                                   [0, -1, -2, -1,  0],
+                                   [-1,-2, 16, -2, -1],
+                                   [0, -1, -2, -1,  0],
+                                   [0,  0, -1,  0,  0]]]], dtype=torch.float32).to(device)
+    edge_kernel=torch.tile(edge_kernel,(1,3,1,1))
+    edge_mask = F.conv2d(image_tensor, edge_kernel, padding=2)
+    
+    # Normalize the output to range 0-1
+    edge_mask = torch.sigmoid(edge_mask * 1.5 + 2).tile(1,3,1,1)
+    assert edge_mask.shape[1:]==image_tensor.shape[1:]
+
+    return edge_mask

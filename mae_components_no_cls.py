@@ -12,7 +12,7 @@ from torchvision.transforms import v2
 import numpy as np
 from mae_utils import *
 from timm.models.layers import drop_path
-from utils import center_crop
+from utils import center_crop, get_edge_mask
 
 '''MAE prefix cnn section'''
 class PrefixResnet(nn.Module):
@@ -274,6 +274,7 @@ class MaskedViTDecoder(nn.Module):
         device,
         norm_pix_loss=False,
         masked_decoder_loss=False,
+        edge_emphasize_loss=False,
         reward_pred=False,
         vis=False
     ):
@@ -290,6 +291,7 @@ class MaskedViTDecoder(nn.Module):
         
         self.norm_pix_loss = norm_pix_loss
         self.masked_decoder_loss = masked_decoder_loss
+        self.edge_emphasize_loss = edge_emphasize_loss
         self.reward_pred = reward_pred
 
         #mask_token
@@ -433,6 +435,11 @@ class MaskedViTDecoder(nn.Module):
         with torch.no_grad():
             imgs, masks = center_crop(imgs, xy, patch_size=self.patch_size, img_size=imgs.shape[-1])
 
+        if self.edge_emphasize_loss:
+            with torch.no_grad():
+                edge_mask = get_edge_mask(imgs,self.device).to(self.device)
+                imgs = edge_mask * imgs
+
         assert imgs.shape[0]==pred.shape[0]
         target = self.patchify(imgs)
 
@@ -460,6 +467,13 @@ class MaskedViTDecoder(nn.Module):
         """
         if self.masked_decoder_loss:
             invis = torch.tensor(~mask).to(self.device)
+
+        if self.edge_emphasize_loss:
+            with torch.no_grad():
+                edge_mask = get_edge_mask(imgs,self.device).to(self.device)
+                imgs = edge_mask * imgs
+                #return edge_mask, imgs_t, imgs
+                #raise ValueError            
             
         assert imgs.shape[0]==pred.shape[0]
         target = self.patchify(imgs)
