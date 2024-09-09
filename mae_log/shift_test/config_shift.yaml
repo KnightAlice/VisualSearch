@@ -1,7 +1,9 @@
 #concatenate shift center to the embedding dim
 
 #shift_param_r_1 is finetuned version of ShiftFormer performing center shift on ImageNet
-#shift_param_coco is ShiftFormer first appiled to COCOSearch18 and do random act exploration.
+#shift_param_coco is ShiftFormer first appiled to COCOSearch18 and do random act exploration, with max_traj_len=10
+#decoder_param_coco_edge is the edge emphasized version of decoder weight
+
 
 Environment:
   radius: 112 #output fovea radius -- usually be doubled

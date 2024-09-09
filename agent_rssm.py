@@ -11,29 +11,31 @@ from mae_components_no_cls import *
 
 class Agent(nn.Module):
 
-    def __init__(self, device, config, grid_size=6, disable_critic=False, recog_threshold=0.5):
+    def __init__(self, device, config, disable_critic=False, recog_threshold=0.5):
         super().__init__()
-        self.grid_size=grid_size #action grid size
+        self.grid_size=config['Environment']['grid_size'] #action grid size
         self.patch_size=config['PrefixCNN']['patch_size']
         self.device=device
         self.embed_dim=config['ViTEncoder']['embed_dim']
         self.disable_critic=disable_critic
 
         self.percept_grid_size=2*config['Environment']['radius']//self.patch_size #perception grid
-        '''
-        self.acmerge=ACMerge_resnet(grid_size=grid_size).to(device)
 
-        self.acmerge.actor_read_out.weight=torch.load(actor_path)
-
-        self.recog_threshold=recog_threshold
-        '''
         self.mae_encoder = MaskedViTEncoder(config, img_size= 2*config['Environment']['radius'], patch_size=self.patch_size, embed_dim=config['ViTEncoder']['embed_dim'], device=device).to(device)
+        print(config['ViTEncoder']['weight_path'])
         print(self.mae_encoder.load_state_dict(torch.load(config['ViTEncoder']['weight_path']), strict=False))
         self.mae_encoder.requires_grad = False
 
         self.shift_encoder =  ShiftTransformer(config, img_size=2*config['Environment']['radius'], patch_size=self.patch_size, embed_dim=config['ShiftTransformer']['embed_dim']-1, device=device).to(device)
+        print(config['ShiftTransformer']['weight_path'])
         print(self.shift_encoder.load_state_dict(torch.load(config['ShiftTransformer']['weight_path']), strict=False))
         self.shift_encoder.requires_grad = False
+
+        self.mae_decoder = MaskedViTDecoder(config, img_size=2*config['Environment']['radius'], patch_size=self.patch_size, encoder_embed_dim=config['ViTEncoder']['embed_dim'], decoder_embed_dim=config['ViTDecoder']['embed_dim'], device=device, masked_decoder_loss=False, edge_emphasize_loss=False).to(device)
+        print(config['ViTDecoder']['weight_path'])
+        print(self.mae_decoder.load_state_dict(torch.load(config['ViTDecoder']['weight_path']), strict=False))
+        self.shift_encoder.requires_grad = False
+        
         self.mae_readout = Block(dim=config['ViTEncoder']['embed_dim'], num_heads=1, mlp_ratio=4, qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., init_values=0, act_layer=nn.GELU, norm_layer=nn.LayerNorm,
                  attn_head_dim=None).to(device)
@@ -64,7 +66,7 @@ class Agent(nn.Module):
             prev_action = (self.percept_grid_size//2*self.percept_grid_size+self.percept_grid_size//2) * torch.ones([batch_size, 2], device=self.device)
 
         if prev_state==None:
-            prev_state = torch.zeros([batch_size, self.percept_grid_size**2, self.embed_dim], device=self.device)
+            prev_state = 10 * torch.randn([batch_size, self.percept_grid_size**2, self.embed_dim], device=self.device)
             
         assert prev_state!=None
         assert prev_action!=None #pre-define needed
@@ -84,25 +86,36 @@ class Agent(nn.Module):
         prev_tokens -- into RSSM --> approximate current state from inner dynamics
         currently using ShiftTransformer here, but in the long run might be replaced by some sequence Transformer
         """
-        h_prior = self.shift_encoder.forward_encoder(prev_state, prev_action) #h_prior should be singled out and used to train for accuracy        
-        h_prior_out = self.mae_readout(h_prior[:, :, 1:]) #deprive assistant dim
+        h_prior = self.shift_encoder.forward_encoder(prev_state, prev_action) #h_prior should be singled out and used to train for accuracy
+        
+        h_prior_out = h_prior[:, :, 1:] #self.mae_readout(h_prior[:, :, 1:]) #deprive assistant dim
         
         """Step 3-> get posteriors P(s|o)
         """
-        h_posterior_out = self.mae_readout(embedded)
+        h_posterior_out = embedded #self.mae_readout(embedded)
         #h_out = self.grucell(hidden)
 
-        print(h_prior_out.shape, h_posterior_out.shape)
-
         #print(h_out)
-        raise ValueError
+        
         
         """Step 3
-        sample the action with highest FEF
+        sample the action with highest EFE -> subject to D_KL(Q(x)||P(x)), but in the context of token embeddings
+        perhaps it's ok to try vector Euclidean distance instead.
         """
+
+        act_batch = torch.linalg.vector_norm(h_prior_out-h_posterior_out, dim=-1) #calculate euclidean distance between state vectors
         
+
+        '''
+        #This is for determined action
+        act_batch = torch.argmax(eu_dist, dim=-1) 
+        x=act_batch//self.grid_size
+        y=act_batch%self.grid_size
+        act_xy=torch.stack([x,y],dim=-1)
+        '''
+
         """Step 4
-        action, states -- decoder --> approximate the next obs coming up
+        mae_decoder -> loss(real obs, predicted)-> neg -> state_value?
         """
         
         """Step 5
@@ -127,9 +140,9 @@ class Agent(nn.Module):
             act_batch=act_batch.view(batch_size,time_step,self.grid_size**2)
             target_values=target_values.view(batch_size,time_step)
 
-        act_probs=F.softmax(act_batch, dim=-1)
+        act_probs=F.softmax(act_batch, dim=-1) #softmax on 196 patches
 
-        return act_probs,target_values,state_values #epistemic_value
+        return act_probs, target_values, act_batch.sum(dim=-1), h_posterior_out
     
     def predict(self, obs, state, deterministic=False, **kwargs):
         raise NotImplementedError

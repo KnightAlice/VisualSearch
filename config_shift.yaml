@@ -46,6 +46,7 @@ ViTDecoder:
   drop_rate: 0.0
   attn_drop_rate: 0.1
   drop_path_rate: 0.1
+  weight_path: './mae_log/shift_test/decoder_param_coco_edge.pth'
 
 ShiftTransformer:
   embed_dim: 513 #512+1
@@ -57,4 +58,4 @@ ShiftTransformer:
   drop_rate: 0.0
   attn_drop_rate: 0.0
   drop_path_rate: 0.0
-  weight_path: './mae_log/shift_test/shift_param_r_1.pth'
+  weight_path: './mae_log/shift_test/shift_param_coco.pth'

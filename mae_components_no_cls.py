@@ -12,7 +12,7 @@ from torchvision.transforms import v2
 import numpy as np
 from mae_utils import *
 from timm.models.layers import drop_path
-from utils import center_crop, get_edge_mask
+from utils_rssm import center_crop, get_edge_mask
 
 '''MAE prefix cnn section'''
 class PrefixResnet(nn.Module):
@@ -568,8 +568,11 @@ class ShiftTransformer(nn.Module):
         """get token embeddings"""
         # embed patches
         batch_size = x.shape[0]
-        assert xy_coord.shape==(batch_size, 2)
-        xy = self.augument_xy(xy_coord)
+        if len(xy_coord.shape) == 1: #[b,]
+            xy =  torch.tile(xy_coord,(1, self.grid_size**2, 1)).transpose(0,2)
+        else:
+            assert xy_coord.shape==(batch_size, 2)
+            xy = self.augument_xy(xy_coord)
 
         #pos_embed
         #x = x + self.pos_embed[:,self.grid_size**2:, :]

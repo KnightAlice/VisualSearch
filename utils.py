@@ -183,9 +183,9 @@ def process_trajs(trajs, gamma, mtd='CRITIC', tau=0.96, epistemic_coef=2):
 
     elif mtd == 'CRITIC':  # critic estimation
 
-        epi_bonus=epi_entropy(epi_values[1:],epi_values[:-1]).mean(-1)-0.5 #0.5 seems to be the crossentropy of two rand vectors
+        #epi_bonus=epi_entropy(epi_values[1:],epi_values[:-1]).mean(-1)-0.5 #0.5 seems to be the crossentropy of two rand vectors
         '''I deprived the - values[:-1] term because the Value implemented here is not accumulated but present'''
-        trajs['advantages'] = trajs['rewards'] + gamma * values[1:]  + epistemic_coef*epi_bonus #- values[:-1]
+        trajs['advantages'] = trajs['rewards'] + gamma * values[1:]  #+ epistemic_coef*epi_bonus #- values[:-1]
         #in the circumstance, 'rewards' should be externally fed
 
     elif mtd == 'GAE':  # generalized advantage estimation
